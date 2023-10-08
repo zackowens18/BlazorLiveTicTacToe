@@ -1,0 +1,233 @@
+﻿@page "/"
+@using Microsoft.AspNetCore.SignalR.Client
+@inject NavigationManager Navigation
+@implements IAsyncDisposable
+@using TicTacToe.Shared.Objects
+@inject IJSRuntime JsRuntime
+
+
+
+<PageTitle>Index</PageTitle>
+<div class="container-fluid w-100">
+    <div class="form-group">
+        <label>
+            room:
+            <input disabled="@(IsRoomJoined)" @bind="roomInput" />
+        </label>
+    </div>
+
+
+    @if (IsRoomJoined)
+    {
+        <button @onclick="LeaveGame" disabled="@(!IsConnected)">Leave Game</button>
+        <button @onclick="Send" disabled="@(!IsConnected)">Send</button>
+        <div  class="form-group">
+            <label>
+                Message:
+                <input @bind="messageInput" size="50" />
+            </label>
+        </div>
+        <hr>
+        <ul id="messagesList">
+            @foreach (var message in messages)
+            {
+                <li>@message</li>
+            }
+        </ul>
+        <hr>
+        @if (game.IsPlayerX)
+        {
+            <h3>You are X</h3>
+        }
+        else
+        {
+            <h3>You are O</h3>    
+        }
+        @if (isYourTurn)
+        {
+            <h4>Your turn</h4>
+        }
+        else
+        {
+            <h4>Waiting on opponent</h4>
+        }
+        <div class="game-board">
+            <div class="game-grid">
+                @for(int x = 0; x < 9; x++)
+                {
+                    var localX = x;
+                    <div class= "game-cell" @onclick="() => MakeMove(localX)">@DisplaySquare(@game.BoardValues[localX])</div>    
+                }
+                
+            </div>
+        </div>
+
+    }
+    else
+    {
+        <button @onclick="JoinGame" disabled="@(!IsConnected)">Join Game</button>
+    }
+</div>
+
+<style>
+.game-grid {
+    height: 320px;
+    width: 320px;
+    display: inline-grid;
+    grid-template-columns: auto auto auto;
+    background: black;
+  
+    column-gap: 10px;
+    row-gap: 10px;
+    aspect-ratio: 1;
+}
+
+.game-cell {
+    background: gray;
+    width: 100px;
+    height: 100px;
+    font-size: 10vh;
+    text-align: center;
+}
+</style>
+
+@code {
+    private HubConnection? hubConnection;
+    private List<string> messages = new List<string>();
+    private string? roomInput;
+    private string? messageInput;
+    private bool IsRoomJoined = false;
+    private GameData game = new GameData();
+    public bool isYourTurn => 
+        game.BoardValues.Count(x=>x==0) % 2 == 1 && game.IsPlayerX  // X goes first at 9 and odd plays
+        || game.BoardValues.Count(x=>x==0) %2 == 0 &&!game.IsPlayerX; // O goes if even number of plays
+
+
+    public class GameData
+    {
+        public int[] BoardValues = new int[9];
+        public bool IsPlayerX;
+    }
+
+    public static string DisplaySquare(int i) => i switch
+    {
+        0 => " ",
+        1 => "X",
+        2 => "O",
+        _ => " ", 
+    };
+
+
+
+    #region HubCommands
+    protected override async Task OnInitializedAsync()
+    {
+        Console.WriteLine("inited");
+        hubConnection = new HubConnectionBuilder()
+            .WithUrl(Navigation.ToAbsoluteUri("/tictactoe"))
+            .Build();
+
+        hubConnection.On<string, string, GameResult>("ReceivedMove", (room, message,result) =>
+           {
+               var encodedMsg = $"RM {room} - {result}: {message}";
+           //TODO - get winning state on server 
+
+
+           messages.Add(encodedMsg);
+               StateHasChanged();
+           });
+
+        hubConnection.On<string,int[],GameResult>("Move", async (value,x,result) =>
+                 {
+                     var encodedMsg = $"Moved - {x}";
+                     game.BoardValues = x;
+                    
+
+                     StateHasChanged();
+                     if (result != GameResult.Continue)
+                     {
+                         Console.WriteLine("Not continued");
+                         string gameResultString = result switch
+                         {
+                             GameResult.XWins => this.game.IsPlayerX ? "You win" : "You lost. Better Luck Next Time",
+                             GameResult.OWins => !game.IsPlayerX ? "You win" : "You lost. Better Luck Next Time",
+                             GameResult.Draw => "Draw. Nice Try",
+                             _ => throw new ArgumentOutOfRangeException(nameof(result), $"Not expected GameResult value: {result}"),
+                         };
+
+
+                         await JsRuntime.InvokeVoidAsync("alert", gameResultString); // Alert
+               }                   
+                 });
+
+        await hubConnection.StartAsync();
+    }
+
+    private async Task Send()
+    {
+        if (hubConnection is not null)
+        {
+            await hubConnection.SendAsync("SendMessage", roomInput, messageInput);
+        }
+    }
+
+    private async Task MakeMove(int x)
+    {
+        Console.WriteLine($"clickeddiv-{x}");
+        if(isYourTurn && hubConnection is not null && game.BoardValues[x] == 0)
+        {
+            Console.WriteLine($"sentmove-{x}");
+            game.BoardValues[x] = game.IsPlayerX ? 1 : 2;
+            await hubConnection.SendAsync("SendMove", game.BoardValues, roomInput);
+        }
+
+    }
+
+    private async Task JoinGame()
+    {
+        game.BoardValues = new int[9];
+        if (hubConnection is not null && roomInput !=null)
+        {
+            var roomJoined = await hubConnection.InvokeAsync<JoinedState>("JoinGame", roomInput);
+            if(roomJoined == null)
+            {
+                throw new ArgumentNullException("Join State failed");
+            }
+
+            // if Works swap to deconstructor
+            IsRoomJoined = roomJoined.joined;
+            game.IsPlayerX = roomJoined.isPlayerX;
+            game.BoardValues = roomJoined.board;
+
+            if (!IsRoomJoined)
+            {
+                await JsRuntime.InvokeVoidAsync("alert", "Game is already full please pick another or wait until game ends!"); // Alert
+            }
+            Console.WriteLine($"{roomJoined}");
+            StateHasChanged();
+        }
+    }
+    private async Task LeaveGame()
+    {
+        if (hubConnection is not null)
+        {
+            await hubConnection.SendAsync("LeaveGame", roomInput);
+            IsRoomJoined = false;
+        }
+    }
+
+    public bool IsConnected =>
+        hubConnection?.State == HubConnectionState.Connected;
+
+    public async ValueTask DisposeAsync()
+    {
+        if (hubConnection is not null)
+        {
+            await hubConnection.DisposeAsync();
+        }
+    }
+
+    // Add disconnect to -> remove user from group
+    #endregion
+    
+}
