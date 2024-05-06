@@ -72,6 +72,10 @@ namespace TicTacToe.Server.Hubs
 
             var gameResult = RoomGameDict[room].CheckGameStatus();
             await Clients.Group(room).SendAsync("Move", room, board, gameResult);
+            if(gameResult != GameResult.Continue)
+            {
+                RoomGameDict[room] = new TicTacToeGameData();
+            }
         }
 
         public override Task OnDisconnectedAsync(Exception? exception)

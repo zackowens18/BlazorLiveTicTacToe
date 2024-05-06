@@ -130,10 +130,8 @@
         hubConnection.On<string, string, GameResult>("ReceivedMove", (room, message,result) =>
            {
                var encodedMsg = $"RM {room} - {result}: {message}";
-           //TODO - get winning state on server 
 
-
-           messages.Add(encodedMsg);
+               messages.Add(encodedMsg);
                StateHasChanged();
            });
 
@@ -141,7 +139,7 @@
                  {
                      var encodedMsg = $"Moved - {x}";
                      game.BoardValues = x;
-                    
+
 
                      StateHasChanged();
                      if (result != GameResult.Continue)
@@ -155,8 +153,13 @@
                              _ => throw new ArgumentOutOfRangeException(nameof(result), $"Not expected GameResult value: {result}"),
                          };
 
+                         this.roomInput = string.Empty;
+                         this.IsRoomJoined = false;
+                         game = new GameData();
 
                          await JsRuntime.InvokeVoidAsync("alert", gameResultString); // Alert
+
+                         StateHasChanged();
                }                   
                  });
 
@@ -218,6 +221,7 @@
 
     public bool IsConnected =>
         hubConnection?.State == HubConnectionState.Connected;
+
 
     public async ValueTask DisposeAsync()
     {
