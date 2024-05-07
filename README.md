@@ -19,3 +19,8 @@ This project has the following features:
 2. After 2 users join a room no more can.
 3. Users can play Tic Tac Toe and a popup occurs with the results.
 4. Any user can leave and join if no other user takes the place in the meantime
+
+## How to run
+
+1. cd into the BlazorLiveTicTacToe\TicTacToe\Server
+2. run `dotnet run [--urls urls]`
